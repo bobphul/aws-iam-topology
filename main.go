@@ -30,22 +30,15 @@ func getUserData(details *iam.GetAccountAuthorizationDetailsOutput, wg *sync.Wai
     for _, user := range details.UserDetailList {
         _, err := addUserData(driver, *user.UserName, *user.Arn, *user.UserId)
         check(err)
-	//fmt.Println("uid: ", uid, "name: ", *user.UesrName)
         for _, user_attached_group := range user.GroupList{
-	    //fmt.Println("pid: ", pid, "name: ", *user_attached_policy.PolicyName)
-            //fmt.Println("USER:", *user.UserName, "--> GROUP:", user_attached_group)
-	    //_, err = addRelationData(driver, "User", *user.UserName, "MEMBER_OF", "Group", user_attached_group)
 	    _, err = addUserGroupRelationData(driver, *user.UserName, user_attached_group)
 	    check(err)
         }
         for _, user_attached_policy := range user.AttachedManagedPolicies{
 	    _, err := addPolicyData(driver, *user_attached_policy.PolicyName)
 	    check(err)
-	    //fmt.Println("pid: ", pid, "name: ", *user_attached_policy.PolicyName)
-	    //_, err = addRelationData(driver, "Policy", *user_attached_policy.PolicyName, "ATTACHED", "User", *user.UserName)
 	    _, err = addUserPolicyRelationData(driver, *user_attached_policy.PolicyName, *user.UserName)
 	    check(err)
-            //fmt.Println("USER:", *user.UserName, "--> POLICY:", *user_attached_policy.PolicyName)
         }
     }
 }
@@ -64,11 +57,8 @@ func getGroupData(details *iam.GetAccountAuthorizationDetailsOutput, wg *sync.Wa
 	for _, group_attached_policy := range group.AttachedManagedPolicies{
 	    _, err := addPolicyData(driver, *group_attached_policy.PolicyName)
 	    check(err)
-	    //fmt.Println("gid: ", gid, "name: ", *group_attached_policy.PolicyName)
-	    //_, err = addRelationData(driver, "Policy", *group_attached_policy.PolicyName, "ATTACHED", "Group", *group.GroupName)
 	    _, err = addGroupPolicyRelationData(driver, *group_attached_policy.PolicyName, *group.GroupName)
 	    check(err)
-            //fmt.Println("GROUP:", *group.GroupName, "--> POLICY:", *group_attached_policy.PolicyName)
 	}
     }
 }
@@ -87,7 +77,6 @@ func getRoleData(details *iam.GetAccountAuthorizationDetailsOutput, wg *sync.Wai
             if match == false {
 	        _, err := addPolicyData(driver, *role_attached_policy.PolicyName)
 	        check(err)
-	        //fmt.Println("pid: ", pid, "name: ", *user_attached_policy.PolicyName)
                 fmt.Println("ROLE:", *role.RoleName, "--> POLICY:", *role_attached_policy.PolicyName)
 	    }
 	}
@@ -241,34 +230,7 @@ func matchPolicyNodeTxFunc(name string) neo4j.TransactionWork {
     }
 }
 
-func addRelationData(driver neo4j.Driver, sourceType string, sourceName string, relation string, targetType string, targetName string) (int64, error){
-    //fmt.Println("addRelationData source-", sourceType," target-",targetType," relation-",relation)
-    session := driver.NewSession(neo4j.SessionConfig{})
-    defer session.Close()
-    var rid interface{}
-    var err error
-    rid, err = session.ReadTransaction(matchRelationTxFunc(sourceType, sourceName, relation, targetType, targetName))
-    check(err)
-
-    if rid != nil {
-        return rid.(int64), nil
-    }
-
-    _, err = session.WriteTransaction(addRelationTxFunc(sourceType, sourceName, relation, targetType, targetName))
-    check(err)
-
-    rid, err = session.ReadTransaction(matchRelationTxFunc(sourceType, sourceName, relation, targetType, targetName))
-    check(err)
-
-    if rid != nil {
-        return rid.(int64), nil
-    }
-
-    return -1, nil
-}
-
 func addUserPolicyRelationData(driver neo4j.Driver, sourceName string, targetName string) (int64, error){
-    //fmt.Println("addRelationData source-", sourceType," target-",targetType," relation-",relation)
     session := driver.NewSession(neo4j.SessionConfig{})
     defer session.Close()
     var rid interface{}
@@ -294,7 +256,6 @@ func addUserPolicyRelationData(driver neo4j.Driver, sourceName string, targetNam
 }
 
 func addGroupPolicyRelationData(driver neo4j.Driver, sourceName string, targetName string) (int64, error){
-    //fmt.Println("addRelationData source-", sourceType," target-",targetType," relation-",relation)
     session := driver.NewSession(neo4j.SessionConfig{})
     defer session.Close()
     var rid interface{}
@@ -320,7 +281,6 @@ func addGroupPolicyRelationData(driver neo4j.Driver, sourceName string, targetNa
 }
 
 func addUserGroupRelationData(driver neo4j.Driver, sourceName string, targetName string) (int64, error){
-    //fmt.Println("addRelationData source-", sourceType," target-",targetType," relation-",relation)
     session := driver.NewSession(neo4j.SessionConfig{})
     defer session.Close()
     var rid interface{}
@@ -345,74 +305,6 @@ func addUserGroupRelationData(driver neo4j.Driver, sourceName string, targetName
     return -1, nil
 }
 
-func addRelationTxFunc(sourceType string, sourceName string, relation string, targetType string, targetName string) neo4j.TransactionWork {
-    fmt.Println("addRelationTxFunc target-", targetType," ",targetName," relation-",relation)
-    switch relation {
-    case "ATTACHED":
-        switch targetName {
-        case "User":
-            fmt.Println("ADD ","sName-",sourceName," tName-",targetName)
-            return func(tx neo4j.Transaction) (interface{}, error) {
-                auresult, err := tx.Run("MATCH (u:User),(p:Policy) WHERE p.name=$sName AND u.name=$tName CREATE (p)-[rel:ATTACHED {relation: p.name+'-->'+u.name}]->(u)", map[string]interface{}{
-                    "sName": sourceName,
-                    "tName": targetName,
-                })
-                if err != nil {return nil, err}
-                //return auresult.Consume()
-	        if auresult.Next() {
-                    return auresult.Record().Values[0], nil
-                }
-
-	        return nil, nil
-            }
-        case "Group":
-            fmt.Println("ADD ","sName-",sourceName," tName-",targetName)
-            return func(tx neo4j.Transaction) (interface{}, error) {
-                agresult, err := tx.Run("MATCH (g:Group),(p:Policy) WHERE p.name=$sName AND g.name=$tName CREATE (p)-[rel:ATTACHED {relation: p.name+'-->'+g.name}]->(g)", map[string]interface{}{
-                    "sName": sourceName,
-                    "tName": targetName,
-                })
-                if err != nil {return nil, err}
-                //return auresult.Consume()
-	        if agresult.Next() {
-                    return agresult.Record().Values[0], nil
-                }
-
-	        return nil, nil
-            }
-        }
-    case "MEMBER_OF":
-        return func(tx neo4j.Transaction) (interface{}, error) {
-            mresult, err := tx.Run("MATCH (u:User),(g:Group) WHERE u.name=$sName AND g.name=$tName CREATE (u)-[rel:MEMEBER_OF {relation: u.name+'-->'+g.name}]->(g)", map[string]interface{}{
-                "sName": sourceName,
-                "tName": targetName,
-            })
-            if err != nil {return nil, err}
-            //return mresult.Consume()
-	    if mresult.Next() {
-                return mresult.Record().Values[0], nil
-            }
-
-	    return nil, nil
-        }
-    }
-
-    return func(tx neo4j.Transaction) (interface{}, error) {
-        fmt.Println("add default ","sName-",sourceName," tName-",targetName)
-        result, err := tx.Run("MATCH (u:User),(p:Policy) WHERE p.name=$sName AND u.name=$tName CREATE (p)-[rel:ATTACHED {relation: p.name+'-->'+u.name}]->(u)", map[string]interface{}{
-            "sName": sourceName,
-            "tName": targetName,
-        })
-        if err != nil {return nil, err}
-        //return mresult.Consume()
-	if result.Next() {
-            return result.Record().Values[0], nil
-        }
-
-	return nil, nil
-    }
-}
-
 func addUserPolicyRelationTxFunc(sourceName string, targetName string) neo4j.TransactionWork {
     return func(tx neo4j.Transaction) (interface{}, error) {
         result, err := tx.Run("MATCH (u:User),(p:Policy) WHERE p.name=$sName AND u.name=$tName CREATE (p)-[rel:ATTACHED {relation: p.name+'-->'+u.name}]->(u)", map[string]interface{}{
@@ -420,8 +312,8 @@ func addUserPolicyRelationTxFunc(sourceName string, targetName string) neo4j.Tra
             "tName": targetName,
         })
         if err != nil {return nil, err}
-        //return mresult.Consume()
-        if result.Next() {
+
+	if result.Next() {
             return result.Record().Values[0], nil
         }
 
@@ -436,8 +328,8 @@ func addGroupPolicyRelationTxFunc(sourceName string, targetName string) neo4j.Tr
             "tName": targetName,
         })
         if err != nil {return nil, err}
-        //return mresult.Consume()
-        if result.Next() {
+
+	if result.Next() {
             return result.Record().Values[0], nil
         }
 
@@ -452,81 +344,6 @@ func addUserGroupRelationTxFunc(sourceName string, targetName string) neo4j.Tran
             "tName": targetName,
         })
         if err != nil {return nil, err}
-        //return mresult.Consume()
-        if result.Next() {
-            return result.Record().Values[0], nil
-        }
-
-        return nil, nil
-    }
-}
-
-func matchRelationTxFunc(sourceType string, sourceName string, relation string, targetType string, targetName string) neo4j.TransactionWork {
-    fmt.Println("matchRelationTxFunc target-", targetType," ",targetName," relation-",relation)
-    switch relation {
-    case "ATTACHED":
-        switch targetName {
-        case "User":
-            return func(tx neo4j.Transaction) (interface{}, error) {
-                auresult, err := tx.Run("MATCH (p:Policy {name: $sName})-[rel:ATTACHED]->(u:User {name: $tName}) RETURN id(rel)", map[string]interface{}{
-                    "sName": sourceName,
-                    "tName": targetName,
-                })
-                if err != nil {
-                    return nil, err
-                }
-
-                if auresult.Next() {
-                    return auresult.Record().Values[0], nil
-                }
-
-                return nil, nil
-            }
-        case "Group":
-            fmt.Println("MATCH"," sName-",sourceName," tName-",targetName)
-            return func(tx neo4j.Transaction) (interface{}, error) {
-                agresult, err := tx.Run("MATCH (p:Policy {name: $sName})-[rel:ATTACHED]->(g:Group {name: $tName}) RETURN id(rel)", map[string]interface{}{
-                    "sName": sourceName,
-                    "tName": targetName,
-                })
-                if err != nil {
-                    return nil, err
-                }
-
-                if agresult.Next() {
-                    return agresult.Record().Values[0], nil
-                }
-
-                return nil, nil
-            }
-        }
-    case "MEMBER_OF":
-        return func(tx neo4j.Transaction) (interface{}, error) {
-            //mresult, err := tx.Run("MATCH (u:User {name: $sName})-[rel:MEMBER_OF]->(g:Group {name: $tName}) RETURN id(rel)", map[string]interface{}{
-            //mresult, err := tx.Run("MATCH ()-[rel]->() WHERE rel.relation=$sName-->$tName RETURN id(rel)", map[string]interface{}{
-            mresult, err := tx.Run("MATCH (u)-[rel]->(g) WHERE u.name=$sName AND g.name=$tName RETURN id(rel)", map[string]interface{}{
-                "sName": sourceName,
-                "tName": targetName,
-            })
-            if err != nil {return nil, err}
-            //return mresult.Consume()
-	    if mresult.Next() {
-                return mresult.Record().Values[0], nil
-            }
-
-	    return nil, nil
-        }
-    }
-
-    return func(tx neo4j.Transaction) (interface{}, error) {
-        fmt.Println("match default ","sName-",sourceName," tName-",targetName)
-        result, err := tx.Run("MATCH (p:Policy {name: $sName})-[rel:ATTACHED]->(u:User {name: $tName}) RETURN id(rel)", map[string]interface{}{
-            "sName": sourceName,
-            "tName": targetName,
-        })
-        if err != nil {
-            return nil, err
-        }
 
         if result.Next() {
             return result.Record().Values[0], nil
